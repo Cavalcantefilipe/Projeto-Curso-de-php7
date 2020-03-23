@@ -11,9 +11,7 @@ class Model {
 
 		foreach ($data as $key => $value)
 		{
-
 			$this->{"set".$key}($value);
-
 		}
 
 	}
@@ -26,29 +24,18 @@ class Model {
 
 		if (in_array($fieldName, $this->fields))
 		{
-			
-			switch ($method)
-			{
-
-				case "get":
-					return $this->values[$fieldName];
-				break;
-
-				case "set":
+			if($method == "get"){
+				return $this->values[$fieldName];
+			}else{
 					$this->values[$fieldName] = $args[0];
-				break;
-
 			}
-
 		}
 
 	}
 
 	public function getValues()
 	{
-
 		return $this->values;
-
 	}
 
 }
