@@ -13,29 +13,85 @@ class User extends Model
 
 	const SESSION = "User";
 	const SECRET = "recuperacaoSenha";
-
+	const ERROR = "UserError";
+	const ERROR_REGISTER = "UserErrorRegister";
+	const SUCCESS = "Error";
 	protected $fields = [
-		"iduser", "idperson", "deslogin", "despassword", "inadmin", "dtergister", "desperson", "desemail", "nrphone"
+		"iduser", "idperson", "deslogin", "despassword", 
+		"inadmin", "dtergister", "desperson", "desemail", "nrphone", "password",
+		'idaddress', 'idcart', 'idstatus', 'idorder',
+        'iduser', 'vltotal', 'dtregister', 'desstatus',
+        'dtregister', 'dessessionid', 'iduser', 'deszipcode',
+        'vlfreight', 'nrdays', 'dtregister', 'iduser',
+        'idperson', 'deslogin', 'despassword', 'inadmin',
+        'dtregister', 'idperson', 'desaddress', 'descomplement',
+        'descity', 'desstate', 'descountry', 'deszipcode',
+        'desdistrict', 'dtregister', 'idperson', 'desperson',
+        'desemail', 'nrphone', 'dtregister'
 	];
+
+	public static function getFromSession()
+	{
+
+		$user = new User();
+		if (isset($_SESSION[User::SESSION]) && (int) $_SESSION[User::SESSION]['iduser'] > 0) {
+
+			$user->setData($_SESSION[User::SESSION]);
+		}
+		return $user;
+	}
+
+	public static function checkLogin($inadmin = true)
+	{
+		if (
+			!isset($_SESSION[User::SESSION])
+			||
+			!$_SESSION[User::SESSION]
+			||
+			!(int) $_SESSION[User::SESSION]["iduser"] > 0
+		) {
+			return false;
+		} else {
+
+			if ($inadmin === true && (bool) $_SESSION[User::SESSION]["inadmin"] === true) {
+				return true;
+			} else if ($inadmin === false) {
+
+				return true;
+			} else {
+
+				return false;
+			}
+		}
+	}
 
 	public static function login($login, $password): User
 	{
 
 		$db = new Sql();
 
-		$results = $db->select("SELECT * FROM tb_users WHERE deslogin = :LOGIN", array(
-			":LOGIN" => $login
-		));
-
+		$results = $db->select(
+			"SELECT * 
+			FROM tb_users a
+			Join tb_persons b on b.idperson = a.idperson
+			WHERE a.deslogin = :LOGIN",
+			array(
+				":LOGIN" => $login
+			)
+		);
 		if (count($results) === 0) {
 			throw new \Exception("Não foi possível fazer login.");
 		}
 
 		$data = $results[0];
 
-		if (password_verify($password, $data["despassword"])) {
+
+		if (password_verify($password, $data["despassword"]) === true) {
 
 			$user = new User();
+
+			$data['desperson'] = utf8_encode($data['desperson']);
+
 			$user->setData($data);
 
 			$_SESSION[User::SESSION] = $user->getValues();
@@ -53,10 +109,20 @@ class User extends Model
 		$_SESSION[User::SESSION] = NULL;
 	}
 
-	public static function listAll()
+	public static function listAll($search = null)
 	{
 
 		$sql = new Sql();
+
+		if($search != null){
+			return $sql->select(
+				"SELECT * 
+				FROM tb_users a
+				JOIN tb_persons b on b.idperson = a.idperson
+				WHERE b.desperson like :search OR b.desemail like :search or a.deslogin like :search",array(
+					':search'=>'%'.$search.'%'
+				));
+		}
 
 		return $sql->select("SELECT * FROM tb_users JOIN tb_persons on tb_persons.idperson = tb_users.idperson");
 	}
@@ -67,8 +133,8 @@ class User extends Model
 
 		$results = $sql->select("CALL sp_users_save(:desperson,:deslogin,:despassword,:desemail,:nrphone,:inadmin)", array(
 			":desperson" => $this->getdesperson(),
-			":deslogin" => $this->getdeslogin(),
-			":despassword" => $this->getdespassword(),
+			":deslogin" => utf8_decode($this->getdeslogin()),
+			":despassword" => User::getPasswordHash($this->getdespassword()),
 			":desemail" => $this->getdesemail(),
 			":nrphone" => $this->getnrphone(),
 			":inadmin" => $this->getinadmin()
@@ -83,18 +149,24 @@ class User extends Model
 			":ID" => $idUser
 		));
 
+		$result[0]['desperson'] = utf8_encode($result[0]['desperson']);
+
+
 		$this->setData($result[0]);
 	}
 
-	public function updateUser()
+	public function updateUser($senha = null)
 	{
 
+		if ($senha != null) {
+			$this->setdespassword($senha);
+		}
 		$sql = new Sql();
 		$results = $sql->select("CALL sp_usersupdate_save(:iduser,:desperson,:deslogin,:despassword,:desemail,:nrphone,:inadmin)", array(
 			":iduser" => $this->getiduser(),
-			":desperson" => $this->getdesperson(),
+			":desperson" => utf8_decode($this->getdesperson()),
 			":deslogin" => $this->getdeslogin(),
-			":despassword" => $this->getdespassword(),
+			":despassword" => User::getPasswordHash($this->getdespassword()),
 			":desemail" => $this->getdesemail(),
 			":nrphone" => $this->getnrphone(),
 			":inadmin" => $this->getinadmin()
@@ -110,7 +182,7 @@ class User extends Model
 		));
 	}
 
-	public function getForgot($email)
+	public function getForgot($email, $inadmin = true)
 	{
 
 		$sql = new Sql();
@@ -134,17 +206,18 @@ class User extends Model
 
 			if (count($rec) > 0) {
 
-				$Cifra =  'AES-256-CBC';
+				$ivlen = openssl_cipher_iv_length($cipher = "aes-128-cbc");
 
-				$IV = random_bytes(openssl_cipher_iv_length($Cifra));
+				//Generate Random IV  
+				$iv = openssl_random_pseudo_bytes($ivlen);
+				$ciphertext_raw = openssl_encrypt($rec[0]['idrecovery'], $cipher, User::SECRET, $options = OPENSSL_RAW_DATA, $iv);
+				$code = base64_encode($iv . $ciphertext_raw);
 
-				$TextoCifrado = openssl_encrypt($rec[0]['idrecovery'], $Cifra, user::SECRET, OPENSSL_RAW_DATA, $IV);
-
-				$code = base64_encode($IV . $TextoCifrado);
-
-
-				$link = "http://www.hcodecommerce.com.br/admin/forgot/reset?code=$code";
-
+				if ($inadmin === true) {
+					$link = "http://www.hcodecommerce.com.br/admin/forgot/reset?code=$code";
+				} else {
+					$link = "http://www.hcodecommerce.com.br/forgot/reset?code=$code";
+				}
 				$email = new Mailer($result[0]["desemail"], $result[0]["desperson"], "Recuperação de senha", "forgot", array(
 					"name" => $result[0]["desperson"],
 					"link" => $link
@@ -163,14 +236,11 @@ class User extends Model
 
 	public static function validForgotDecrypt($id)
 	{
-		$code = base64_decode($id);
-		$Cifra =  'AES-256-CBC';
-		$TextoCifrado = mb_substr($code, openssl_cipher_iv_length($Cifra), null, '8bit');
-
-		//$Chave = pack('H*', 'be3494ff4904fd83bf78e3cec0d38ddbf48d0a6a666be05420667a5a7d2c4e0d');
-		$IV = mb_substr($code, 0, openssl_cipher_iv_length($Cifra), '8bit');
-
-		$TextoClaro = openssl_decrypt($TextoCifrado, $Cifra, User::SECRET, OPENSSL_RAW_DATA, $IV);
+		$c = base64_decode("$id");
+		$ivlen = openssl_cipher_iv_length($cipher = "aes-128-cbc");
+		$iv = substr($c, 0, $ivlen);
+		$ciphertext_raw = substr($c, $ivlen);
+		$original_plaintext = openssl_decrypt($ciphertext_raw, $cipher, User::SECRET, $options = OPENSSL_RAW_DATA, $iv);
 
 		$sql = new Sql();
 
@@ -186,7 +256,7 @@ class User extends Model
 				AND
 				DATE_ADD(a.dtregister,INTERVAL 1 HOUR) >= Now()",
 			array(
-				":ID" => $TextoClaro
+				":ID" => $original_plaintext
 			)
 		);
 		if (count($results) == 0) {
@@ -206,6 +276,59 @@ class User extends Model
 		));
 	}
 
+	public static function setErrorRegister($msg)
+	{
+		$_SESSION[User::ERROR_REGISTER] = $msg;
+	}
+
+	public static function getErrorRegister()
+	{
+		$msg = (isset($_SESSION[User::ERROR_REGISTER]) && $_SESSION[User::ERROR]) ? $_SESSION[User::ERROR_REGISTER] : '';
+
+		User::clearError();
+
+		return $msg;
+	}
+
+	public static function clearErrorRegister()
+	{
+		$_SESSION[User::ERROR_REGISTER] = NULL;
+	}
+
+	public static function setError($msg)
+	{
+		$_SESSION[User::ERROR] = $msg;
+	}
+
+
+	public static function getError()
+	{
+		$msg = (isset($_SESSION[User::ERROR]) && $_SESSION[User::ERROR]) ? $_SESSION[User::ERROR] : '';
+
+		User::clearError();
+
+		return $msg;
+	}
+
+	public static function clearError()
+	{
+		$_SESSION[User::ERROR] = NULL;
+	}
+
+	public static function checkLoginExist($login)
+	{
+
+		$sql = new Sql;
+
+		$results = $sql->select("SELECT * FROM Tb_users WHERE deslogin = :deslogin", array(
+			':deslogin' => $login
+		));
+
+		return (count($results) > 0);
+	}
+
+
+
 	public function setPassword($password)
 	{
 		$sql = new Sql();
@@ -223,18 +346,62 @@ class User extends Model
 	public static function verifyLogin($inadmin = true)
 	{
 
-		if (
-			!isset($_SESSION[User::SESSION])
-			||
-			!$_SESSION[User::SESSION]
-			||
-			!(int) $_SESSION[User::SESSION]["iduser"] > 0
-			||
-			(bool) $_SESSION[User::SESSION]["iduser"] !== $inadmin
-		) {
+		if (User::checkLogin($inadmin)) {
 
-			header("Location: /admin/login");
+			if ($inadmin) {
+				header("Location: /admin/login");
+			} else if ($inadmin == false) {
+				header("Location: /login");
+			}
 			exit;
 		}
+	}
+
+	public static function getPasswordHash($password)
+	{
+		return password_hash($password, PASSWORD_DEFAULT, array(
+			'cost' => 12
+		));
+	}
+
+	public static function setSuccess($msg)
+	{
+		$_SESSION[User::SUCCESS] = $msg;
+	}
+
+
+	public static function getSuccess()
+	{
+		$msg = (isset($_SESSION[User::SUCCESS]) && $_SESSION[User::SUCCESS]) ? $_SESSION[User::SUCCESS] : '';
+
+		User::clearSuccess();
+
+		return $msg;
+	}
+
+	public static function clearSuccess()
+	{
+		$_SESSION[User::SUCCESS] = NULL;
+	}
+
+
+	public function getOrders()
+	{
+		$sql = new Sql();
+
+        $results = $sql->select(
+        "SELECT * 
+        FROM tb_orders a 
+        JOIN tb_ordersstatus b USING(idstatus)
+        JOIN tb_carts c USING(idcart)
+        JOIN tb_users d ON d.iduser = a.iduser
+        JOIN tb_addresses e USING(idaddress)
+        JOIN tb_persons f ON f.idperson = d.idperson
+        where d.iduser = :iduser",
+            array(
+                ':iduser' => $this->getiduser()
+            )
+		);
+        return $results;
 	}
 }

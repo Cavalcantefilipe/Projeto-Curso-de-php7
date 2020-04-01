@@ -25,7 +25,7 @@ class Model {
 		if (in_array($fieldName, $this->fields))
 		{
 			if($method == "get"){
-				return $this->values[$fieldName];
+				return (isset($this->values[$fieldName])) ? $this->values[$fieldName] : NULL;
 			}else{
 					$this->values[$fieldName] = $args[0];
 			}
